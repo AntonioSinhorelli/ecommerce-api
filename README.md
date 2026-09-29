@@ -5,13 +5,13 @@ API REST do tema **E-commerce** (disciplina Projeto de Cloud), feita a partir do
 
 ## 🔗 API publicada
 
-> **URL da API:** http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/api/
+> **URL da API:** http://ecommerce-as-api-env.eba-jpapde3u.us-east-1.elasticbeanstalk.com/api/
 >
-> **Django Admin:** http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/admin/
+> **Django Admin:** http://ecommerce-as-api-env.eba-jpapde3u.us-east-1.elasticbeanstalk.com/admin/
 >
-> **Health check:** http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/ → `{"status": "ok", ...}`
+> **Health check:** http://ecommerce-as-api-env.eba-jpapde3u.us-east-1.elasticbeanstalk.com/ → `{"status": "ok", ...}`
 >
-> Ambiente: `ecommerce-api-env` · Região: **us-east-2 (Ohio)** · Plataforma: Python 3.12 / Amazon Linux 2023 · Single instance
+> Região: **us-east-1 (N. Virginia)** · Plataforma: Python 3.12 / Amazon Linux 2023 · Single instance
 
 | Item | Nome |
 |---|---|
@@ -197,7 +197,7 @@ O `Procfile` inicia o `gunicorn` com `ecommerce.wsgi:application` na porta 8000,
 ### 4.5 Criar / trocar a senha do admin depois do deploy
 
 - **Forma recomendada:** altere `DJANGO_SUPERUSER_PASSWORD` em *Environment properties* e clique em *Apply*.
-  O EB reinicia e o `criar_admin` roda de novo com a nova senha.
+  Depois faça **Upload and deploy** do mesmo `app.zip`: só o deploy da aplicação roda o `criar_admin` (e o `collectstatic`) de novo.
 - **Via SSH (alternativa):**
   ```bash
   eb ssh    # ou "Connect" pelo console EC2
@@ -209,9 +209,9 @@ O `Procfile` inicia o `gunicorn` com `ecommerce.wsgi:application` na porta 8000,
 ### 4.6 Validação
 
 1. Aguarde o ambiente ficar com **Health: Ok (Green)**.
-2. http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/ → `{"status": "ok", ..., "versao": "v4"}`
-3. http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/api/clientes/ e http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/api/pedidos/ → `200`
-4. http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/admin/ → login com `admin` → cadastrar um cliente com pedidos.
+2. http://ecommerce-as-api-env.eba-jpapde3u.us-east-1.elasticbeanstalk.com/ → `{"status": "ok", ..., "versao": "v4"}`
+3. http://ecommerce-as-api-env.eba-jpapde3u.us-east-1.elasticbeanstalk.com/api/clientes/ e http://ecommerce-as-api-env.eba-jpapde3u.us-east-1.elasticbeanstalk.com/api/pedidos/ → `200`
+4. http://ecommerce-as-api-env.eba-jpapde3u.us-east-1.elasticbeanstalk.com/admin/ → login com `admin` → cadastrar um cliente com pedidos.
 5. Conferir em `/api/clientes/` que o cliente aparece com `"total_pedidos"` e a lista de pedidos.
 
 ### 4.7 Problemas comuns
@@ -225,7 +225,8 @@ O `Procfile` inicia o `gunicorn` com `ecommerce.wsgi:application` na porta 8000,
 | Login do admin volta para a tela de login | `DJANGO_SECURE_SSL_REDIRECT` ligado sem HTTPS — deixe `False` |
 | `manage.py` não encontrado | Zip com pasta pai; gere de novo com `python deploy/gerar_app_zip.py` |
 | Páginas abrem, mas login/salvar dá **500** | Banco sem permissão de escrita para o `webapp` — resolvido pelo passo `04_permissoes` e pelos hooks `.platform` |
-| Login do admin recusa a senha | `DJANGO_SUPERUSER_PASSWORD` não cadastrada — adicione em *Configuration* e clique em *Apply* |
+| Login do admin recusa a senha | `DJANGO_SUPERUSER_PASSWORD` não cadastrada — adicione em *Configuration*, clique em *Apply* **e depois faça *Upload and deploy* do mesmo `app.zip`** |
+| CSS some / `/static/...` dá 404 depois de mudar variáveis | O *Apply* de configuração não roda de novo o `collectstatic` nem o `criar_admin` — faça **Upload and deploy** do mesmo `app.zip` |
 
 Logs: **Elastic Beanstalk → Environment → Logs → Request logs → Last 100 lines / Full logs**
 (`web.stdout.log` = erros do Django/gunicorn, `cfn-init-cmd.log` = saída do migrate/collectstatic/criar_admin).
@@ -238,7 +239,9 @@ Os erros 500 aparecem com o *traceback* completo no `web.stdout.log` (configura�
 | v1 | Ambiente criado (Health Ok), mas faltou `DJANGO_SUPERUSER_PASSWORD` → admin não foi criado | Variável adicionada em *Configuration → Environment properties* |
 | v1 | Admin abria **sem CSS**: o console novo do EB mapeia `/static` para a pasta `static`, e o projeto usava `staticfiles` | `STATIC_ROOT` passou a ser `static/` + **WhiteNoise** como reserva (v2) |
 | v2/v3 | Leitura funcionava, mas login e cadastro davam **500**: o `migrate` roda como root e o site roda como `webapp`, que não conseguia gravar no SQLite | Banco movido para `/var/app/data`, `chown` para `webapp` no deploy (v3) e hooks `.platform` pós-deploy (v4) |
-| v4 | Tudo funcionando: API, admin, cadastro de clientes e pedidos | Versão atual (`"versao": "v4"` na raiz) |
+| v4 | Tudo funcionando: API, admin, cadastro de clientes e pedidos | — |
+| v4 (us-east-1) | No ambiente novo, depois de ajustar a senha com *Apply*, o admin ficou sem CSS (`/static` 404) e sem usuário | Novo *Upload and deploy* do mesmo `app.zip` (v4b) rodou `collectstatic` e `criar_admin` |
+| v4b (final) | Ambiente recriado na região **us-east-1 (N. Virginia)**, a mesma do roteiro de aula, com o `app.zip` v4 | Ambiente anterior em us-east-2 (Ohio) encerrado · versão atual (`"versao": "v4"` na raiz) |
 
 ---
 
