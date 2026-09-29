@@ -5,9 +5,13 @@ API REST do tema **E-commerce** (disciplina Projeto de Cloud), feita a partir do
 
 ## 🔗 API publicada
 
-> **URL da API:** `http://SEU-AMBIENTE.us-east-1.elasticbeanstalk.com/api/`  ← *substituir após o deploy*
+> **URL da API:** http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/api/
 >
-> **Django Admin:** `http://SEU-AMBIENTE.us-east-1.elasticbeanstalk.com/admin/`
+> **Django Admin:** http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/admin/
+>
+> **Health check:** http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/ → `{"status": "ok", ...}`
+>
+> Ambiente: `ecommerce-api-env` · Região: **us-east-2 (Ohio)** · Plataforma: Python 3.12 / Amazon Linux 2023 · Single instance
 
 | Item | Nome |
 |---|---|
@@ -83,8 +87,8 @@ Também é possível testar pelo navegador (interface *browsable* do DRF) abrind
 Requisitos: **Python 3.12+** (o Django 6 não roda em versões anteriores).
 
 ```bash
-git clone https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git
-cd SEU-REPOSITORIO
+git clone https://github.com/AntonioSinhorelli/ecommerce-api.git
+cd ecommerce-api
 
 python -m venv .venv
 # Windows:       .venv\Scripts\activate
@@ -127,6 +131,8 @@ O arquivo `deploy/app.zip` fica com os arquivos **na raiz** (sem pasta pai) e **
 ```
 manage.py  requirements.txt  Procfile  runtime.txt
 .ebextensions/01_django.config
+.platform/hooks/postdeploy/01_permissoes_banco.sh
+.platform/confighooks/postdeploy/01_permissoes_banco.sh
 ecommerce/   (settings, urls, wsgi)
 vendas/      (models, serializers, views, urls, admin, migrations, criar_admin)
 ```
@@ -146,7 +152,8 @@ vendas/      (models, serializers, views, urls, admin, migrations, criar_admin)
    (no AWS Academy/Learner Lab: `LabRole` e `LabInstanceProfile`).
 8. **Database (opcional, recomendado):** habilite o RDS integrado → Engine **mysql**, classe `db.t4g.micro`/`db.t3.micro`,
    usuário e senha. O EB cria automaticamente as variáveis `RDS_*`.
-   - Sem RDS o projeto usa SQLite dentro da instância (funciona para demonstração, mas os dados se perdem se a instância for recriada).
+   - Sem RDS (opção usada nesta entrega) o projeto usa SQLite em `/var/app/data/db.sqlite3`, fora da pasta do código:
+     os dados sobrevivem a novos deploys, mas se perdem se a instância EC2 for recriada.
 
 ### 4.3 Variáveis de ambiente (Environment properties)
 
@@ -155,12 +162,14 @@ Na etapa **Configure updates, monitoring, and logging** → *Environment propert
 
 | Nome | Valor |
 |---|---|
-| `SECRET_KEY` | chave gerada com o comando da seção 3 |
-| `DJANGO_DEBUG` | `False` |
-| `DJANGO_ALLOWED_HOSTS` | `.elasticbeanstalk.com` |
-| `DJANGO_SUPERUSER_USERNAME` | `admin` |
-| `DJANGO_SUPERUSER_EMAIL` | `admin@ecommerce.com` |
-| `DJANGO_SUPERUSER_PASSWORD` | uma senha forte |
+| `SECRET_KEY` | chave gerada com o comando da seção 3 (**obrigatória**) |
+| `DJANGO_SUPERUSER_PASSWORD` | senha do admin (**obrigatória** para criar o superusuário) |
+| `DJANGO_DEBUG` | `False` (opcional — já é o padrão) |
+| `DJANGO_ALLOWED_HOSTS` | `.elasticbeanstalk.com` (opcional — já é o padrão) |
+| `DJANGO_SUPERUSER_USERNAME` | `admin` (opcional — já é o padrão) |
+| `DJANGO_SUPERUSER_EMAIL` | `admin@ecommerce.com` (opcional — já é o padrão) |
+
+> ⚠️ Não use o botão *Import from .env file*: o `.env` local tem `DJANGO_DEBUG=True`.
 
 `RDS_DB_NAME`, `RDS_USERNAME`, `RDS_PASSWORD`, `RDS_HOSTNAME` e `RDS_PORT` são preenchidas pelo EB quando o RDS é
 criado junto com o ambiente. Se o RDS foi criado separadamente, adicione-as manualmente e libere a porta `3306` no
@@ -171,12 +180,17 @@ Security Group do RDS para o Security Group das instâncias do EB.
 O arquivo `.ebextensions/01_django.config` configura:
 
 - `DJANGO_SETTINGS_MODULE=ecommerce.settings` e `WSGIPath=ecommerce.wsgi:application`;
-- o nginx servindo `/static` a partir de `staticfiles/` (CSS do admin);
-- `container_commands`, executados a cada deploy:
+- o nginx servindo `/static` a partir da pasta `static/`, com WhiteNoise como reserva (CSS do admin);
+- `container_commands`, executados a cada deploy (como root):
+  0. cria a pasta `/var/app/data` (banco SQLite, fora do código);
   1. `migrate` — cria as tabelas de `Cliente` e `Pedido`;
-  2. `collectstatic` — copia os arquivos estáticos do admin;
+  2. `collectstatic` — copia os arquivos estáticos do admin para `static/`;
   3. **`criar_admin` — cria o superusuário (admin/root)** com as variáveis `DJANGO_SUPERUSER_*`.
-     É idempotente: em deploys seguintes só atualiza a senha, sem duplicar o usuário.
+     É idempotente: em deploys seguintes só atualiza a senha, sem duplicar o usuário;
+  4. passa a pasta `/var/app/data` para o usuário `webapp` (quem roda o site).
+
+Os scripts em `.platform/hooks/postdeploy/` e `.platform/confighooks/postdeploy/` rodam **depois** do deploy
+(e depois de mudanças de configuração) e garantem de novo a permissão de gravação do `webapp` no banco.
 
 O `Procfile` inicia o `gunicorn` com `ecommerce.wsgi:application` na porta 8000, atrás do nginx do EB.
 
@@ -195,10 +209,10 @@ O `Procfile` inicia o `gunicorn` com `ecommerce.wsgi:application` na porta 8000,
 ### 4.6 Validação
 
 1. Aguarde o ambiente ficar com **Health: Ok (Green)**.
-2. `http://SEU-AMBIENTE.../` → `{"status": "ok", ...}`
-3. `http://SEU-AMBIENTE.../api/clientes/` e `/api/pedidos/` → `200`
-4. `http://SEU-AMBIENTE.../admin/` → login com o usuário/senha definidos → cadastrar um cliente com pedidos.
-5. Copie a URL do ambiente para a seção **API publicada** no topo deste README.
+2. http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/ → `{"status": "ok", ..., "versao": "v4"}`
+3. http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/api/clientes/ e http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/api/pedidos/ → `200`
+4. http://ecommerce-antonio.us-east-2.elasticbeanstalk.com/admin/ → login com `admin` → cadastrar um cliente com pedidos.
+5. Conferir em `/api/clientes/` que o cliente aparece com `"total_pedidos"` e a lista de pedidos.
 
 ### 4.7 Problemas comuns
 
@@ -210,9 +224,21 @@ O `Procfile` inicia o `gunicorn` com `ecommerce.wsgi:application` na porta 8000,
 | Admin sem CSS | `collectstatic` falhou — veja *Logs → Request logs → Full logs* (`cfn-init-cmd.log`) |
 | Login do admin volta para a tela de login | `DJANGO_SECURE_SSL_REDIRECT` ligado sem HTTPS — deixe `False` |
 | `manage.py` não encontrado | Zip com pasta pai; gere de novo com `python deploy/gerar_app_zip.py` |
+| Páginas abrem, mas login/salvar dá **500** | Banco sem permissão de escrita para o `webapp` — resolvido pelo passo `04_permissoes` e pelos hooks `.platform` |
+| Login do admin recusa a senha | `DJANGO_SUPERUSER_PASSWORD` não cadastrada — adicione em *Configuration* e clique em *Apply* |
 
 Logs: **Elastic Beanstalk → Environment → Logs → Request logs → Last 100 lines / Full logs**
 (`web.stdout.log` = erros do Django/gunicorn, `cfn-init-cmd.log` = saída do migrate/collectstatic/criar_admin).
+Os erros 500 aparecem com o *traceback* completo no `web.stdout.log` (configuração `LOGGING` no `settings.py`).
+
+### 4.8 Histórico do deploy (etapas realizadas)
+
+| Versão | O que aconteceu | Correção |
+|---|---|---|
+| v1 | Ambiente criado (Health Ok), mas faltou `DJANGO_SUPERUSER_PASSWORD` → admin não foi criado | Variável adicionada em *Configuration → Environment properties* |
+| v1 | Admin abria **sem CSS**: o console novo do EB mapeia `/static` para a pasta `static`, e o projeto usava `staticfiles` | `STATIC_ROOT` passou a ser `static/` + **WhiteNoise** como reserva (v2) |
+| v2/v3 | Leitura funcionava, mas login e cadastro davam **500**: o `migrate` roda como root e o site roda como `webapp`, que não conseguia gravar no SQLite | Banco movido para `/var/app/data`, `chown` para `webapp` no deploy (v3) e hooks `.platform` pós-deploy (v4) |
+| v4 | Tudo funcionando: API, admin, cadastro de clientes e pedidos | Versão atual (`"versao": "v4"` na raiz) |
 
 ---
 
@@ -220,16 +246,17 @@ Logs: **Elastic Beanstalk → Environment → Logs → Request logs → Last 100
 
 1. Crie o repositório no GitHub e envie o código:
    ```bash
-   git remote add origin https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git
+   git remote add origin https://github.com/AntonioSinhorelli/ecommerce-api.git
    git push -u origin main
    ```
 2. **Settings → Collaborators → Add people** → adicione o professor como colaborador.
-3. Atualize a URL da API publicada no topo deste README e faça commit/push.
+3. URL da API publicada informada no topo deste README.
 
 ## Estrutura do projeto
 
 ```
-├── .ebextensions/01_django.config   # config do Elastic Beanstalk (migrate, collectstatic, criar_admin)
+├── .ebextensions/01_django.config   # config do Elastic Beanstalk (migrate, collectstatic, criar_admin, permissões)
+├── .platform/                       # hooks pós-deploy (permissão de gravação no banco)
 ├── deploy/
 │   ├── app.zip                      # pacote enviado ao EB
 │   └── gerar_app_zip.py             # gera o app.zip
