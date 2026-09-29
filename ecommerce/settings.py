@@ -174,10 +174,21 @@ elif USE_MYSQL_LOCAL and not IS_TEST:
         }
     }
 else:
+    # No Elastic Beanstalk (sem RDS) o SQLite fica em /var/app/data, fora da pasta do código:
+    # - a pasta pertence ao usuário "webapp", que roda o site (permite gravar);
+    # - não é apagada a cada novo deploy (os dados cadastrados continuam lá).
+    _eb_data_dir = Path('/var/app/data')
+    if os.getenv('SQLITE_PATH'):
+        _sqlite_path = Path(os.getenv('SQLITE_PATH'))
+    elif not DEBUG and not IS_TEST and _eb_data_dir.parent.exists():
+        _sqlite_path = _eb_data_dir / 'db.sqlite3'
+    else:
+        _sqlite_path = BASE_DIR / 'db.sqlite3'
+
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+            'NAME': _sqlite_path,
         }
     }
 
@@ -220,4 +231,18 @@ STATIC_ROOT = BASE_DIR / 'static'
 STORAGES = {
     'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
     'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
+}
+
+# ---------------------------------------------------------------------------
+# Logs: com DEBUG=False o Django não mostra os erros 500 no console.
+# Aqui eles vão para o stdout -> no EB aparecem em Logs > web.stdout.log
+# ---------------------------------------------------------------------------
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'django.db.backends': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+    },
 }
